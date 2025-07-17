@@ -8,8 +8,13 @@ struct binding_context {
     uintptr_t index;
 };
 
+struct cookie_context {
+    uintptr_t index;
+};
+
 void _webviewDispatchGoCallback(void *);
 void _webviewBindingGoCallback(webview_t, char *, char *, uintptr_t);
+void _webviewCookieGoCallback(char *, uintptr_t);
 
 static void _webview_dispatch_cb(webview_t w, void *arg) {
     _webviewDispatchGoCallback(arg);
@@ -33,4 +38,16 @@ void CgoWebViewBind(webview_t w, const char *name, uintptr_t index) {
 
 void CgoWebViewUnbind(webview_t w, const char *name) {
     webview_unbind(w, name);
+}
+
+static void _webview_cookie_cb(const char *cookies, void *arg) {
+    struct cookie_context *ctx = (struct cookie_context *) arg;
+    _webviewCookieGoCallback((char *)cookies, ctx->index);
+    free(ctx);
+}
+
+void CgoWebViewGetCookies(webview_t w, uintptr_t index) {
+    struct cookie_context *ctx = calloc(1, sizeof(struct cookie_context));
+    ctx->index = index;
+    webview_get_cookies(w, _webview_cookie_cb, (void *)ctx);
 }

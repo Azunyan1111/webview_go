@@ -360,6 +360,23 @@ WEBVIEW_API void webview_return(webview_t w, const char *seq, int status,
  */
 WEBVIEW_API const webview_version_info_t *webview_version(void);
 
+/**
+ * Cookie callback function type.
+ * @param cookies JSON string containing array of cookies.
+ * @param arg User-provided argument.
+ */
+typedef void (*webview_cookie_callback_t)(const char *cookies, void *arg);
+
+/**
+ * Get all cookies from the webview asynchronously.
+ * Only supported on macOS with WKWebView.
+ *
+ * @param w The webview instance.
+ * @param callback Function to call with the cookies.
+ * @param arg User-provided argument passed to the callback.
+ */
+WEBVIEW_API void webview_get_cookies(webview_t w, webview_cookie_callback_t callback, void *arg);
+
 #ifdef __cplusplus
 }
 
@@ -1009,6 +1026,10 @@ if (status === 0) {\
   void set_html(const std::string &html) { set_html_impl(html); }
   void init(const std::string &js) { init_impl(js); }
   void eval(const std::string &js) { eval_impl(js); }
+  
+  void get_cookies(webview_cookie_callback_t callback, void *arg) {
+    get_cookies_impl(callback, arg);
+  }
 
 protected:
   virtual void navigate_impl(const std::string &url) = 0;
@@ -1023,6 +1044,7 @@ protected:
   virtual void set_html_impl(const std::string &html) = 0;
   virtual void init_impl(const std::string &js) = 0;
   virtual void eval_impl(const std::string &js) = 0;
+  virtual void get_cookies_impl(webview_cookie_callback_t callback, void *arg) = 0;
 
   virtual void on_message(const std::string &msg) {
     auto seq = json_parse(msg, "id", 0);
@@ -1387,6 +1409,11 @@ public:
       fn(WEBKIT_WEB_VIEW(m_webview), js.c_str(), nullptr, nullptr, nullptr);
     }
   }
+  
+  void get_cookies_impl(webview_cookie_callback_t callback, void *arg) override {
+    // Not implemented for GTK
+    callback("[]", arg);
+  }
 
 private:
   static char *get_string_from_js_result(WebKitJavascriptResult *r) {
@@ -1716,6 +1743,99 @@ public:
                                             "stringWithUTF8String:"_sel,
                                             js.c_str()),
                          nullptr);
+  }
+  
+  void get_cookies_impl(webview_cookie_callback_t callback, void *arg) override {
+    // Ensure we're on the main thread
+    dispatch([this, callback, arg]() {
+      objc::autoreleasepool arp;
+      
+      // Get the WKWebView's configuration
+      auto config = objc::msg_send<id>(m_webview, "configuration"_sel);
+      auto dataStore = objc::msg_send<id>(config, "websiteDataStore"_sel);
+      auto cookieStore = objc::msg_send<id>(dataStore, "httpCookieStore"_sel);
+      
+      // Create a block to handle the cookies
+      struct CookieCallbackData {
+        webview_cookie_callback_t callback;
+        void *arg;
+      };
+      
+      auto callbackData = new CookieCallbackData{callback, arg};
+      
+      // Create the completion handler block
+      auto block = ^(id cookies) {
+        objc::autoreleasepool arp2;
+        
+        // Convert cookies to JSON
+        auto jsonArray = objc::msg_send<id>("NSMutableArray"_cls, "array"_sel);
+        
+        // Enumerate through cookies
+        auto count = objc::msg_send<NSUInteger>(cookies, "count"_sel);
+        for (NSUInteger i = 0; i < count; i++) {
+          auto cookie = objc::msg_send<id>(cookies, "objectAtIndex:"_sel, i);
+          
+          // Create dictionary for cookie properties
+          auto dict = objc::msg_send<id>("NSMutableDictionary"_cls, "dictionary"_sel);
+          
+          // Add cookie properties
+          auto name = objc::msg_send<id>(cookie, "name"_sel);
+          auto value = objc::msg_send<id>(cookie, "value"_sel);
+          auto domain = objc::msg_send<id>(cookie, "domain"_sel);
+          auto path = objc::msg_send<id>(cookie, "path"_sel);
+          
+          objc::msg_send<void>(dict, "setObject:forKey:"_sel, name, "name"_str);
+          objc::msg_send<void>(dict, "setObject:forKey:"_sel, value, "value"_str);
+          objc::msg_send<void>(dict, "setObject:forKey:"_sel, domain, "domain"_str);
+          objc::msg_send<void>(dict, "setObject:forKey:"_sel, path, "path"_str);
+          
+          // Add expiration date if exists
+          auto expiresDate = objc::msg_send<id>(cookie, "expiresDate"_sel);
+          if (expiresDate) {
+            auto timeInterval = objc::msg_send<double>(expiresDate, "timeIntervalSince1970"_sel);
+            auto expiresNumber = objc::msg_send<id>("NSNumber"_cls, "numberWithDouble:"_sel, timeInterval);
+            objc::msg_send<void>(dict, "setObject:forKey:"_sel, expiresNumber, "expires"_str);
+          }
+          
+          // Add boolean properties
+          auto isSecure = objc::msg_send<BOOL>(cookie, "isSecure"_sel);
+          auto isHttpOnly = objc::msg_send<BOOL>(cookie, "isHTTPOnly"_sel);
+          auto isSessionOnly = objc::msg_send<BOOL>(cookie, "isSessionOnly"_sel);
+          
+          objc::msg_send<void>(dict, "setObject:forKey:"_sel, 
+                             objc::msg_send<id>("NSNumber"_cls, "numberWithBool:"_sel, isSecure), 
+                             "secure"_str);
+          objc::msg_send<void>(dict, "setObject:forKey:"_sel, 
+                             objc::msg_send<id>("NSNumber"_cls, "numberWithBool:"_sel, isHttpOnly), 
+                             "httpOnly"_str);
+          objc::msg_send<void>(dict, "setObject:forKey:"_sel, 
+                             objc::msg_send<id>("NSNumber"_cls, "numberWithBool:"_sel, isSessionOnly), 
+                             "sessionOnly"_str);
+          
+          objc::msg_send<void>(jsonArray, "addObject:"_sel, dict);
+        }
+        
+        // Convert to JSON string
+        auto jsonData = objc::msg_send<id>("NSJSONSerialization"_cls, 
+                                          "dataWithJSONObject:options:error:"_sel,
+                                          jsonArray, 0, nullptr);
+        auto jsonString = objc::msg_send<id>("NSString"_cls, "alloc"_sel);
+        jsonString = objc::msg_send<id>(jsonString, "initWithData:encoding:"_sel, 
+                                       jsonData, 4); // NSUTF8StringEncoding = 4
+        
+        auto cJsonString = objc::msg_send<const char*>(jsonString, "UTF8String"_sel);
+        
+        // Call the callback
+        callbackData->callback(cJsonString, callbackData->arg);
+        
+        // Clean up
+        objc::msg_send<void>(jsonString, "release"_sel);
+        delete callbackData;
+      };
+      
+      // Call getAllCookies with the block
+      objc::msg_send<void>(cookieStore, "getAllCookies:"_sel, block);
+    });
   }
 
 private:
@@ -3309,6 +3429,11 @@ public:
   void set_html_impl(const std::string &html) override {
     m_webview->NavigateToString(widen_string(html).c_str());
   }
+  
+  void get_cookies_impl(webview_cookie_callback_t callback, void *arg) override {
+    // Not implemented for Edge/Windows
+    callback("[]", arg);
+  }
 
 private:
   bool embed(HWND wnd, bool debug, msg_cb_t cb) {
@@ -3591,6 +3716,10 @@ WEBVIEW_API void webview_return(webview_t w, const char *seq, int status,
 
 WEBVIEW_API const webview_version_info_t *webview_version(void) {
   return &webview::detail::library_version_info;
+}
+
+WEBVIEW_API void webview_get_cookies(webview_t w, webview_cookie_callback_t callback, void *arg) {
+  static_cast<webview::detail::engine_base *>(w)->get_cookies(callback, arg);
 }
 
 #endif /* WEBVIEW_HEADER */
