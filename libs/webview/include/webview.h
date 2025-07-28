@@ -2017,17 +2017,17 @@ public:
       auto cookieProps = objc::msg_send<id>("NSMutableDictionary"_cls, "dictionary"_sel);
       
       // Set required properties
-      objc::msg_send<void>(cookieProps, "setObject:forKey:"_sel, name.c_str()._str, "NSHTTPCookieName"_str);
-      objc::msg_send<void>(cookieProps, "setObject:forKey:"_sel, value.c_str()._str, "NSHTTPCookieValue"_str);
+      objc::msg_send<void>(cookieProps, "setObject:forKey:"_sel, objc::msg_send<id>("NSString"_cls, "stringWithUTF8String:"_sel, name.c_str()), "NSHTTPCookieName"_str);
+      objc::msg_send<void>(cookieProps, "setObject:forKey:"_sel, objc::msg_send<id>("NSString"_cls, "stringWithUTF8String:"_sel, value.c_str()), "NSHTTPCookieValue"_str);
       
       // Set domain (default to current domain if not specified)
       if (!domain.empty()) {
-        objc::msg_send<void>(cookieProps, "setObject:forKey:"_sel, domain.c_str()._str, "NSHTTPCookieDomain"_str);
+        objc::msg_send<void>(cookieProps, "setObject:forKey:"_sel, objc::msg_send<id>("NSString"_cls, "stringWithUTF8String:"_sel, domain.c_str()), "NSHTTPCookieDomain"_str);
       }
       
       // Set path (default to "/" if not specified)
       if (!path.empty()) {
-        objc::msg_send<void>(cookieProps, "setObject:forKey:"_sel, path.c_str()._str, "NSHTTPCookiePath"_str);
+        objc::msg_send<void>(cookieProps, "setObject:forKey:"_sel, objc::msg_send<id>("NSString"_cls, "stringWithUTF8String:"_sel, path.c_str()), "NSHTTPCookiePath"_str);
       } else {
         objc::msg_send<void>(cookieProps, "setObject:forKey:"_sel, "/"_str, "NSHTTPCookiePath"_str);
       }
