@@ -37,16 +37,16 @@ func main() {
 			return document.cookie;
 		};
 	`)
-	
+
 	// Try to get cookies after page loads
 	go func() {
 		// Wait for page to load and cookies to be set
 		time.Sleep(3 * time.Second)
-		
+
 		// Check JavaScript cookies
 		w.Eval(`console.log('Checking cookies from JavaScript...');`)
 		w.Eval(`console.log('document.cookie =', document.cookie);`)
-		
+
 		log.Println("Attempting to get cookies via GetCookies...")
 		cookies, err := w.GetCookies()
 		if err != nil {
@@ -57,7 +57,7 @@ func main() {
 				log.Printf("  %s = %s (domain: %s)", cookie.Name, cookie.Value, cookie.Domain)
 			}
 		}
-		
+
 		// Try again after a delay
 		time.Sleep(3 * time.Second)
 		log.Println("Second attempt to get cookies...")

@@ -47,7 +47,7 @@ func TestGetCookies(t *testing.T) {
 
 	// Set HTML and wait for it to load
 	w.SetHtml(testHTML)
-	
+
 	// Give time for cookies to be set
 	time.Sleep(100 * time.Millisecond)
 
@@ -63,19 +63,19 @@ func TestGetCookies(t *testing.T) {
 			t.Errorf("Failed to get cookies: %v", err)
 		} else {
 			t.Logf("Retrieved %d cookies", len(cookies))
-			
+
 			// Check if we got some cookies
 			if len(cookies) == 0 {
 				t.Error("Expected to get some cookies, but got none")
 			}
-			
+
 			// Log cookie details
 			for _, cookie := range cookies {
 				t.Logf("Cookie: %s=%s (domain=%s, path=%s, secure=%v, httpOnly=%v)",
-					cookie.Name, cookie.Value, cookie.Domain, cookie.Path, 
+					cookie.Name, cookie.Value, cookie.Domain, cookie.Path,
 					cookie.Secure, cookie.HTTPOnly)
 			}
-			
+
 			// Look for our test cookies
 			foundTest1 := false
 			for _, cookie := range cookies {
@@ -84,7 +84,7 @@ func TestGetCookies(t *testing.T) {
 					break
 				}
 			}
-			
+
 			if !foundTest1 {
 				t.Error("Expected to find test1 cookie")
 			}
@@ -97,7 +97,7 @@ func TestGetCookies(t *testing.T) {
 
 	// Run the webview (this blocks)
 	w.Run()
-	
+
 	// Wait for test to complete
 	<-done
 }
@@ -116,7 +116,7 @@ func TestGetCookiesEmpty(t *testing.T) {
 
 	// Navigate to about:blank (no cookies)
 	w.Navigate("about:blank")
-	
+
 	// Test in a goroutine since Run blocks
 	done := make(chan bool)
 	go func() {
@@ -139,7 +139,7 @@ func TestGetCookiesEmpty(t *testing.T) {
 
 	// Run the webview (this blocks)
 	w.Run()
-	
+
 	// Wait for test to complete
 	<-done
 }

@@ -368,6 +368,13 @@ WEBVIEW_API const webview_version_info_t *webview_version(void);
 typedef void (*webview_cookie_callback_t)(const char *cookies, void *arg);
 
 /**
+ * Clear cookies callback function type.
+ * @param success Whether the operation was successful.
+ * @param arg User-provided argument.
+ */
+typedef void (*webview_clear_cookies_callback_t)(int success, void *arg);
+
+/**
  * Get all cookies from the webview asynchronously.
  * Only supported on macOS with WKWebView.
  *
@@ -376,6 +383,14 @@ typedef void (*webview_cookie_callback_t)(const char *cookies, void *arg);
  * @param arg User-provided argument passed to the callback.
  */
 WEBVIEW_API void webview_get_cookies(webview_t w, webview_cookie_callback_t callback, void *arg);
+
+/**
+ * Clear all cookies from the webview asynchronously.
+ * @param w The webview instance.
+ * @param callback Function to call when operation completes.
+ * @param arg User-provided argument passed to callback.
+ */
+WEBVIEW_API void webview_clear_cookies(webview_t w, webview_clear_cookies_callback_t callback, void *arg);
 
 #ifdef __cplusplus
 }
@@ -1030,6 +1045,10 @@ if (status === 0) {\
   void get_cookies(webview_cookie_callback_t callback, void *arg) {
     get_cookies_impl(callback, arg);
   }
+  
+  void clear_cookies(webview_clear_cookies_callback_t callback, void *arg) {
+    clear_cookies_impl(callback, arg);
+  }
 
 protected:
   virtual void navigate_impl(const std::string &url) = 0;
@@ -1045,6 +1064,7 @@ protected:
   virtual void init_impl(const std::string &js) = 0;
   virtual void eval_impl(const std::string &js) = 0;
   virtual void get_cookies_impl(webview_cookie_callback_t callback, void *arg) = 0;
+  virtual void clear_cookies_impl(webview_clear_cookies_callback_t callback, void *arg) = 0;
 
   virtual void on_message(const std::string &msg) {
     auto seq = json_parse(msg, "id", 0);
@@ -1413,6 +1433,44 @@ public:
   void get_cookies_impl(webview_cookie_callback_t callback, void *arg) override {
     // Not implemented for GTK
     callback("[]", arg);
+  }
+  
+  void clear_cookies_impl(webview_clear_cookies_callback_t callback, void *arg) override {
+    // Get the website data manager
+    auto context = webkit_web_view_get_web_context(WEBKIT_WEB_VIEW(m_webview));
+    auto manager = webkit_web_context_get_website_data_manager(context);
+    
+    if (!manager) {
+      callback(0, arg);
+      return;
+    }
+    
+    // Clear all cookies
+    webkit_website_data_manager_clear(
+      manager,
+      WEBKIT_WEBSITE_DATA_COOKIES,
+      0, // timespan (0 = all time)
+      nullptr, // cancellable
+      [](GObject *, GAsyncResult *result, gpointer user_data) {
+        auto *cb_data = static_cast<std::pair<webview_clear_cookies_callback_t, void*>*>(user_data);
+        GError *error = nullptr;
+        gboolean success = webkit_website_data_manager_clear_finish(
+          WEBKIT_WEBSITE_DATA_MANAGER(g_async_result_get_source_object(G_ASYNC_RESULT(result))),
+          result,
+          &error
+        );
+        
+        if (error) {
+          g_error_free(error);
+          cb_data->first(0, cb_data->second);
+        } else {
+          cb_data->first(success ? 1 : 0, cb_data->second);
+        }
+        
+        delete cb_data;
+      },
+      new std::pair<webview_clear_cookies_callback_t, void*>(callback, arg)
+    );
   }
 
 private:
@@ -1835,6 +1893,59 @@ public:
       
       // Call getAllCookies with the block
       objc::msg_send<void>(cookieStore, "getAllCookies:"_sel, block);
+    });
+  }
+  
+  void clear_cookies_impl(webview_clear_cookies_callback_t callback, void *arg) override {
+    // Ensure we're on the main thread
+    dispatch([this, callback, arg]() {
+      objc::autoreleasepool arp;
+      
+      // Get the WKWebView's configuration
+      auto config = objc::msg_send<id>(m_webview, "configuration"_sel);
+      auto dataStore = objc::msg_send<id>(config, "websiteDataStore"_sel);
+      auto cookieStore = objc::msg_send<id>(dataStore, "httpCookieStore"_sel);
+      
+      // Create a block to get all cookies first
+      auto deleteBlock = ^(id cookies) {
+        objc::autoreleasepool arp2;
+        
+        // Enumerate through cookies and delete each one
+        auto count = objc::msg_send<NSUInteger>(cookies, "count"_sel);
+        
+        if (count == 0) {
+          // No cookies to delete
+          dispatch_async(dispatch_get_main_queue(), ^{
+            callback(1, arg);
+          });
+          return;
+        }
+        
+        // Create a counter to track deletions
+        __block NSUInteger deletedCount = 0;
+        
+        for (NSUInteger i = 0; i < count; i++) {
+          auto cookie = objc::msg_send<id>(cookies, "objectAtIndex:"_sel, i);
+          
+          // Create a completion handler for each delete
+          auto deleteCompletionBlock = ^{
+            deletedCount++;
+            if (deletedCount == count) {
+              // All cookies deleted
+              dispatch_async(dispatch_get_main_queue(), ^{
+                callback(1, arg);
+              });
+            }
+          };
+          
+          // Delete the cookie
+          objc::msg_send<void>(cookieStore, "deleteCookie:completionHandler:"_sel, 
+                               cookie, deleteCompletionBlock);
+        }
+      };
+      
+      // Get all cookies first, then delete them
+      objc::msg_send<void>(cookieStore, "getAllCookies:"_sel, deleteBlock);
     });
   }
 
@@ -3434,6 +3545,58 @@ public:
     // Not implemented for Edge/Windows
     callback("[]", arg);
   }
+  
+  void clear_cookies_impl(webview_clear_cookies_callback_t callback, void *arg) override {
+    if (!m_webview) {
+      callback(0, arg);
+      return;
+    }
+    
+    // Try to get ICoreWebView2_2 interface for cookie management
+    ICoreWebView2_2 *webview2 = nullptr;
+    HRESULT hr = m_webview->QueryInterface(IID_PPV_ARGS(&webview2));
+    
+    if (FAILED(hr) || !webview2) {
+      // Fallback: clear cookies using JavaScript
+      eval_impl("document.cookie.split(';').forEach(function(c) { "
+                "document.cookie = c.replace(/^ +/, '').replace(/=.*/, '=;expires=' + new Date().toUTCString() + ';path=/'); "
+                "});");
+      callback(1, arg);
+      return;
+    }
+    
+    // Get the cookie manager
+    ICoreWebView2CookieManager *cookieManager = nullptr;
+    hr = webview2->get_CookieManager(&cookieManager);
+    webview2->Release();
+    
+    if (FAILED(hr) || !cookieManager) {
+      callback(0, arg);
+      return;
+    }
+    
+    // Create a struct to pass callback data
+    struct ClearCookiesData {
+      webview_clear_cookies_callback_t callback;
+      void *arg;
+    };
+    
+    auto *clearData = new ClearCookiesData{callback, arg};
+    
+    // Delete all cookies
+    hr = cookieManager->DeleteAllCookies();
+    cookieManager->Release();
+    
+    if (SUCCEEDED(hr)) {
+      // Success - call the callback
+      clearData->callback(1, clearData->arg);
+    } else {
+      // Failed
+      clearData->callback(0, clearData->arg);
+    }
+    
+    delete clearData;
+  }
 
 private:
   bool embed(HWND wnd, bool debug, msg_cb_t cb) {
@@ -3720,6 +3883,10 @@ WEBVIEW_API const webview_version_info_t *webview_version(void) {
 
 WEBVIEW_API void webview_get_cookies(webview_t w, webview_cookie_callback_t callback, void *arg) {
   static_cast<webview::detail::engine_base *>(w)->get_cookies(callback, arg);
+}
+
+WEBVIEW_API void webview_clear_cookies(webview_t w, webview_clear_cookies_callback_t callback, void *arg) {
+  static_cast<webview::detail::engine_base *>(w)->clear_cookies(callback, arg);
 }
 
 #endif /* WEBVIEW_HEADER */

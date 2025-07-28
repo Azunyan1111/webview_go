@@ -161,7 +161,7 @@ func main() {
 	go func() {
 		// Wait for WebView to fully initialize
 		time.Sleep(2 * time.Second)
-		
+
 		cookies, err := w.GetCookies()
 		if err != nil {
 			log.Printf("Error getting cookies: %v", err)

@@ -16,21 +16,21 @@ func main() {
 			Path:     "/",
 			HttpOnly: true,
 		})
-		
+
 		http.SetCookie(w, &http.Cookie{
 			Name:   "user_pref",
 			Value:  "dark_mode",
 			Path:   "/",
 			Secure: false,
 		})
-		
+
 		http.SetCookie(w, &http.Cookie{
 			Name:    "temp_data",
 			Value:   "temporary_value",
 			Path:    "/",
 			Expires: time.Now().Add(24 * time.Hour),
 		})
-		
+
 		// HTML response
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprintf(w, `
@@ -57,7 +57,7 @@ func main() {
 </html>
 `, time.Now().Format(time.RFC3339))
 	})
-	
+
 	log.Println("Test server starting on http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
