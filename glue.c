@@ -17,7 +17,7 @@ void _webviewDispatchGoCallback(void *);
 void _webviewBindingGoCallback(webview_t, char *, char *, uintptr_t);
 void _webviewCookieGoCallback(char *, uintptr_t);
 void _webviewClearCookiesGoCallback(int, uintptr_t);
-void _webviewSetCookieGoCallback(int, uintptr_t);
+void _webviewSetCookieGoCallback(int, const char *, uintptr_t);
 
 static void _webview_dispatch_cb(webview_t w, void *arg) {
     _webviewDispatchGoCallback(arg);
@@ -67,9 +67,9 @@ void CgoWebViewClearCookies(webview_t w, uintptr_t index) {
     webview_clear_cookies(w, _webview_clear_cookies_cb, (void *)ctx);
 }
 
-static void _webview_set_cookie_cb(int success, void *arg) {
+static void _webview_set_cookie_cb(int errorCode, const char *errorMessage, void *arg) {
     struct cookie_context *ctx = (struct cookie_context *) arg;
-    _webviewSetCookieGoCallback(success, ctx->index);
+    _webviewSetCookieGoCallback(errorCode, errorMessage, ctx->index);
     free(ctx);
 }
 

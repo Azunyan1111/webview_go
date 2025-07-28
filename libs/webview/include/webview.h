@@ -376,10 +376,11 @@ typedef void (*webview_clear_cookies_callback_t)(int success, void *arg);
 
 /**
  * Set cookie callback function type.
- * @param success Whether the operation was successful.
+ * @param errorCode Error code (0 = success, non-zero = error).
+ * @param errorMessage Error message (NULL on success).
  * @param arg User-provided argument.
  */
-typedef void (*webview_set_cookie_callback_t)(int success, void *arg);
+typedef void (*webview_set_cookie_callback_t)(int errorCode, const char *errorMessage, void *arg);
 
 /**
  * Get all cookies from the webview asynchronously.
@@ -1497,7 +1498,7 @@ public:
   
   void set_cookie_impl(const std::string &cookieJSON, webview_set_cookie_callback_t callback, void *arg) override {
     // Not implemented for GTK
-    callback(100, arg);  // 100 = GTK not implemented
+    callback(100, "SetCookie is not implemented for GTK platform", arg);
   }
 
 private:
@@ -2004,7 +2005,7 @@ public:
       
       // Check if we have required fields
       if (name.empty() || value.empty()) {
-        callback(0, arg);  // 0 = failure
+        callback(2, "Missing required fields: name and value", arg);
         return;
       }
       
@@ -2059,7 +2060,7 @@ public:
       auto cookie = objc::msg_send<id>("NSHTTPCookie"_cls, "cookieWithProperties:"_sel, cookieProps);
       
       if (!cookie) {
-        callback(0, arg);  // 0 = failure
+        callback(3, "Failed to create NSHTTPCookie from properties", arg);
         return;
       }
       
@@ -2073,7 +2074,7 @@ public:
       
       // Create completion handler block for setCookie
       auto completionHandler = ^{
-        callback_data->callback(1, callback_data->arg);  // 1 = success
+        callback_data->callback(0, nullptr, callback_data->arg);  // 0 = success
         delete callback_data;
       };
       
@@ -3739,7 +3740,7 @@ public:
   
   void set_cookie_impl(const std::string &cookieJSON, webview_set_cookie_callback_t callback, void *arg) override {
     // Not implemented for Edge/Windows
-    callback(200, arg);  // 200 = Windows not implemented
+    callback(200, "SetCookie is not implemented for Windows platform", arg);
   }
 
 private:
@@ -4036,7 +4037,7 @@ WEBVIEW_API void webview_clear_cookies(webview_t w, webview_clear_cookies_callba
 WEBVIEW_API void webview_set_cookie(webview_t w, const char *cookieJSON, webview_set_cookie_callback_t callback, void *arg) {
   if (!w || !cookieJSON || !callback) {
     if (callback) {
-      callback(0, arg);
+      callback(1, "Invalid parameters", arg);
     }
     return;
   }

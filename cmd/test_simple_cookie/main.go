@@ -63,7 +63,7 @@ func main() {
 		testCookie := webview.Cookie{
 			Name:   "test_cookie",
 			Value:  "test_value_123",
-			Domain: ".example.com",
+			Domain: "example.com",  // ドメインの先頭の"."を削除
 			Path:   "/",
 		}
 		
@@ -79,7 +79,7 @@ func main() {
 		httpOnlyCookie := webview.Cookie{
 			Name:     "secure_cookie",
 			Value:    "secure_value_456",
-			Domain:   ".example.com",
+			Domain:   "example.com",  // ドメインの先頭の"."を削除
 			Path:     "/",
 			HTTPOnly: true,
 			Secure:   true,

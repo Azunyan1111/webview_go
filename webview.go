@@ -75,6 +75,11 @@ type Cookie struct {
 	SessionOnly bool     `json:"sessionOnly"`
 }
 
+type setCookieResult struct {
+	errorCode    int
+	errorMessage string
+}
+
 type WebView interface {
 
 	// Run runs the main loop until it's terminated. After this function exits -
@@ -162,7 +167,7 @@ var (
 	bindings     = map[uintptr]func(id, req string) (interface{}, error){}
 	cookies      = map[uintptr]chan []Cookie{}
 	clearCookies = map[uintptr]chan bool{}
-	setCookies   = map[uintptr]chan bool{}
+	setCookies   = map[uintptr]chan setCookieResult{}
 	Debug        = false // Set to true to enable debug logging
 )
 
@@ -461,7 +466,7 @@ func _webviewClearCookiesGoCallback(success C.int, index uintptr) {
 }
 
 func (w *webview) SetCookie(cookie Cookie) error {
-	ch := make(chan bool, 1)
+	ch := make(chan setCookieResult, 1)
 
 	m.Lock()
 	// Find an unused index
@@ -488,11 +493,14 @@ func (w *webview) SetCookie(cookie Cookie) error {
 
 	// Wait for the callback with timeout
 	select {
-	case success := <-ch:
+	case result := <-ch:
 		m.Lock()
 		delete(setCookies, setCookieIndex)
 		m.Unlock()
-		if !success {
+		if result.errorCode != 0 {
+			if result.errorMessage != "" {
+				return errors.New(result.errorMessage)
+			}
 			return errors.New("failed to set cookie")
 		}
 		return nil
@@ -505,7 +513,7 @@ func (w *webview) SetCookie(cookie Cookie) error {
 }
 
 //export _webviewSetCookieGoCallback
-func _webviewSetCookieGoCallback(success C.int, index uintptr) {
+func _webviewSetCookieGoCallback(errorCode C.int, errorMessage *C.char, index uintptr) {
 
 	m.Lock()
 	ch, ok := setCookies[index]
@@ -515,5 +523,12 @@ func _webviewSetCookieGoCallback(success C.int, index uintptr) {
 		return
 	}
 
-	ch <- success != 0
+	result := setCookieResult{
+		errorCode: int(errorCode),
+	}
+	if errorMessage != nil {
+		result.errorMessage = C.GoString(errorMessage)
+	}
+
+	ch <- result
 }
