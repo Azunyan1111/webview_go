@@ -375,6 +375,13 @@ typedef void (*webview_cookie_callback_t)(const char *cookies, void *arg);
 typedef void (*webview_clear_cookies_callback_t)(int success, void *arg);
 
 /**
+ * Set cookie callback function type.
+ * @param success Whether the operation was successful.
+ * @param arg User-provided argument.
+ */
+typedef void (*webview_set_cookie_callback_t)(int success, void *arg);
+
+/**
  * Get all cookies from the webview asynchronously.
  * Only supported on macOS with WKWebView.
  *
@@ -391,6 +398,25 @@ WEBVIEW_API void webview_get_cookies(webview_t w, webview_cookie_callback_t call
  * @param arg User-provided argument passed to callback.
  */
 WEBVIEW_API void webview_clear_cookies(webview_t w, webview_clear_cookies_callback_t callback, void *arg);
+
+/**
+ * Set a cookie in the webview asynchronously.
+ * Only supported on macOS with WKWebView.
+ * @param w The webview instance.
+ * @param name Cookie name.
+ * @param value Cookie value.
+ * @param domain Cookie domain.
+ * @param path Cookie path.
+ * @param expires Cookie expiration time (Unix timestamp in seconds, 0 for session cookie).
+ * @param secure Whether the cookie should only be sent over HTTPS.
+ * @param httpOnly Whether the cookie should be accessible only through HTTP(S) requests.
+ * @param callback Function to call when operation completes.
+ * @param arg User-provided argument passed to callback.
+ */
+WEBVIEW_API void webview_set_cookie(webview_t w, const char *name, const char *value, 
+                                   const char *domain, const char *path, double expires,
+                                   int secure, int httpOnly,
+                                   webview_set_cookie_callback_t callback, void *arg);
 
 #ifdef __cplusplus
 }
@@ -1049,6 +1075,12 @@ if (status === 0) {\
   void clear_cookies(webview_clear_cookies_callback_t callback, void *arg) {
     clear_cookies_impl(callback, arg);
   }
+  
+  void set_cookie(const char *name, const char *value, const char *domain, 
+                  const char *path, double expires, int secure, int httpOnly,
+                  webview_set_cookie_callback_t callback, void *arg) {
+    set_cookie_impl(name, value, domain, path, expires, secure, httpOnly, callback, arg);
+  }
 
 protected:
   virtual void navigate_impl(const std::string &url) = 0;
@@ -1065,6 +1097,9 @@ protected:
   virtual void eval_impl(const std::string &js) = 0;
   virtual void get_cookies_impl(webview_cookie_callback_t callback, void *arg) = 0;
   virtual void clear_cookies_impl(webview_clear_cookies_callback_t callback, void *arg) = 0;
+  virtual void set_cookie_impl(const char *name, const char *value, const char *domain, 
+                               const char *path, double expires, int secure, int httpOnly,
+                               webview_set_cookie_callback_t callback, void *arg) = 0;
 
   virtual void on_message(const std::string &msg) {
     auto seq = json_parse(msg, "id", 0);
@@ -1471,6 +1506,13 @@ public:
       },
       new std::pair<webview_clear_cookies_callback_t, void*>(callback, arg)
     );
+  }
+  
+  void set_cookie_impl(const char *name, const char *value, const char *domain, 
+                       const char *path, double expires, int secure, int httpOnly,
+                       webview_set_cookie_callback_t callback, void *arg) override {
+    // Not implemented for GTK
+    callback(0, arg);
   }
 
 private:
@@ -1946,6 +1988,69 @@ public:
       
       // Get all cookies first, then delete them
       objc::msg_send<void>(cookieStore, "getAllCookies:"_sel, deleteBlock);
+    });
+  }
+  
+  void set_cookie_impl(const char *name, const char *value, const char *domain, 
+                       const char *path, double expires, int secure, int httpOnly,
+                       webview_set_cookie_callback_t callback, void *arg) override {
+    // Ensure we're on the main thread
+    dispatch([this, name, value, domain, path, expires, secure, httpOnly, callback, arg]() {
+      objc::autoreleasepool arp;
+      
+      // Get the WKWebView's configuration
+      auto config = objc::msg_send<id>(m_webview, "configuration"_sel);
+      auto dataStore = objc::msg_send<id>(config, "websiteDataStore"_sel);
+      auto cookieStore = objc::msg_send<id>(dataStore, "httpCookieStore"_sel);
+      
+      // Create NSMutableDictionary for cookie properties
+      auto properties = objc::msg_send<id>("NSMutableDictionary"_cls, "dictionary"_sel);
+      
+      // Set required properties
+      auto nsName = objc::msg_send<id>("NSString"_cls, "stringWithUTF8String:"_sel, name);
+      auto nsValue = objc::msg_send<id>("NSString"_cls, "stringWithUTF8String:"_sel, value);
+      auto nsDomain = objc::msg_send<id>("NSString"_cls, "stringWithUTF8String:"_sel, domain);
+      auto nsPath = objc::msg_send<id>("NSString"_cls, "stringWithUTF8String:"_sel, path);
+      
+      objc::msg_send<void>(properties, "setObject:forKey:"_sel, nsName, "Name"_str);
+      objc::msg_send<void>(properties, "setObject:forKey:"_sel, nsValue, "Value"_str);
+      objc::msg_send<void>(properties, "setObject:forKey:"_sel, nsDomain, "Domain"_str);
+      objc::msg_send<void>(properties, "setObject:forKey:"_sel, nsPath, "Path"_str);
+      
+      // Set optional properties
+      if (expires > 0) {
+        auto nsDate = objc::msg_send<id>("NSDate"_cls, "dateWithTimeIntervalSince1970:"_sel, expires);
+        objc::msg_send<void>(properties, "setObject:forKey:"_sel, nsDate, "Expires"_str);
+      }
+      
+      if (secure) {
+        auto nsYes = objc::msg_send<id>("NSNumber"_cls, "numberWithBool:"_sel, YES);
+        objc::msg_send<void>(properties, "setObject:forKey:"_sel, nsYes, "Secure"_str);
+      }
+      
+      if (httpOnly) {
+        auto nsYes = objc::msg_send<id>("NSNumber"_cls, "numberWithBool:"_sel, YES);
+        objc::msg_send<void>(properties, "setObject:forKey:"_sel, nsYes, "HTTPOnly"_str);
+      }
+      
+      // Create NSHTTPCookie
+      auto cookie = objc::msg_send<id>("NSHTTPCookie"_cls, "cookieWithProperties:"_sel, properties);
+      
+      if (!cookie) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+          callback(0, arg);
+        });
+        return;
+      }
+      
+      // Set the cookie with completion handler
+      auto completionBlock = ^{
+        dispatch_async(dispatch_get_main_queue(), ^{
+          callback(1, arg);
+        });
+      };
+      
+      objc::msg_send<void>(cookieStore, "setCookie:completionHandler:"_sel, cookie, completionBlock);
     });
   }
 
@@ -3597,6 +3702,13 @@ public:
     
     delete clearData;
   }
+  
+  void set_cookie_impl(const char *name, const char *value, const char *domain, 
+                       const char *path, double expires, int secure, int httpOnly,
+                       webview_set_cookie_callback_t callback, void *arg) override {
+    // Not implemented for Edge/Windows
+    callback(0, arg);
+  }
 
 private:
   bool embed(HWND wnd, bool debug, msg_cb_t cb) {
@@ -3887,6 +3999,14 @@ WEBVIEW_API void webview_get_cookies(webview_t w, webview_cookie_callback_t call
 
 WEBVIEW_API void webview_clear_cookies(webview_t w, webview_clear_cookies_callback_t callback, void *arg) {
   static_cast<webview::detail::engine_base *>(w)->clear_cookies(callback, arg);
+}
+
+WEBVIEW_API void webview_set_cookie(webview_t w, const char *name, const char *value, 
+                                   const char *domain, const char *path, double expires,
+                                   int secure, int httpOnly,
+                                   webview_set_cookie_callback_t callback, void *arg) {
+  static_cast<webview::detail::engine_base *>(w)->set_cookie(name, value, domain, path, expires, 
+                                                            secure, httpOnly, callback, arg);
 }
 
 #endif /* WEBVIEW_HEADER */

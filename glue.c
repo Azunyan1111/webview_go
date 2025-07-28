@@ -2,6 +2,8 @@
 
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
+#include <stdio.h>
 
 struct binding_context {
     webview_t w;
@@ -16,6 +18,7 @@ void _webviewDispatchGoCallback(void *);
 void _webviewBindingGoCallback(webview_t, char *, char *, uintptr_t);
 void _webviewCookieGoCallback(char *, uintptr_t);
 void _webviewClearCookiesGoCallback(int, uintptr_t);
+void _webviewSetCookieGoCallback(int, uintptr_t);
 
 static void _webview_dispatch_cb(webview_t w, void *arg) {
     _webviewDispatchGoCallback(arg);
@@ -63,4 +66,16 @@ void CgoWebViewClearCookies(webview_t w, uintptr_t index) {
     struct cookie_context *ctx = calloc(1, sizeof(struct cookie_context));
     ctx->index = index;
     webview_clear_cookies(w, _webview_clear_cookies_cb, (void *)ctx);
+}
+
+static void _webview_set_cookie_cb(int success, void *arg) {
+    struct cookie_context *ctx = (struct cookie_context *) arg;
+    _webviewSetCookieGoCallback(success, ctx->index);
+    free(ctx);
+}
+
+void CgoWebViewSetCookie(webview_t w, uintptr_t index, const char *name, const char *value, const char *domain, const char *path, double expires, int secure, int httpOnly) {
+    struct cookie_context *ctx = calloc(1, sizeof(struct cookie_context));
+    ctx->index = index;
+    webview_set_cookie(w, name, value, domain, path, expires, secure, httpOnly, _webview_set_cookie_cb, (void *)ctx);
 }

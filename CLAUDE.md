@@ -28,6 +28,9 @@ go build
 
 # Windows用（コンソールウィンドウなし）
 go build -ldflags="-H windowsgui"
+
+# Exampleプログラムのビルド
+go build ./cmd/test_simple_cookie
 ```
 
 ### テスト
@@ -65,9 +68,22 @@ sudo apt-get install libgtk-3-dev libwebkit2gtk-4.0-dev
 - JavaScript実行エラーは`Eval()`の戻り値でチェック
 - Bind関数内のエラーは適切なJSONレスポンスで返す
 
+## Cgoバインディングの仕組み
+
+### コールバック管理
+- グローバルマップ（`dispatch`, `bindings`, `cookies`, `clearCookies`）でコールバックを管理
+- インデックスベースでGoとC間の関数参照を紐づけ
+- `glue.c`がCコールバックをGoコールバックに変換
+
+### Cookie機能
+- `GetCookies()`: クッキー取得（macOS WKWebViewのみサポート）
+- `ClearCookies()`: クッキークリア
+- 非同期処理でタイムアウト（10秒）機能付き
+
 ## コード実装時の注意点
 
 1. **初期化順序**: `Run()`を呼ぶ前に`Eval()`や`Dispatch()`を呼ばない
 2. **メモリ管理**: `Destroy()`を適切に呼んでリソースを解放
 3. **JSON通信**: Bind関数の引数と戻り値はJSON形式でやり取りされる
 4. **デバッグモード**: `SetDebug(true)`でDevToolsを有効化できる
+5. **プラットフォーム依存**: Cookie機能はmacOSのみ、他のプラットフォームではエラーを返す可能性がある
