@@ -24,6 +24,7 @@ void CgoWebViewBind(webview_t w, const char *name, uintptr_t index);
 void CgoWebViewUnbind(webview_t w, const char *name);
 void CgoWebViewGetCookies(webview_t w, uintptr_t index);
 void CgoWebViewClearCookies(webview_t w, uintptr_t index);
+void CgoWebViewSetCookie(webview_t w, const char *cookieJSON, uintptr_t index);
 */
 import "C"
 import (
@@ -144,6 +145,10 @@ type WebView interface {
 
 	// ClearCookies clears all cookies from the webview.
 	ClearCookies() error
+
+	// SetCookie sets a cookie in the webview.
+	// Only supported on macOS with WKWebView.
+	SetCookie(cookie Cookie) error
 }
 
 type webview struct {
@@ -157,6 +162,7 @@ var (
 	bindings     = map[uintptr]func(id, req string) (interface{}, error){}
 	cookies      = map[uintptr]chan []Cookie{}
 	clearCookies = map[uintptr]chan bool{}
+	setCookies   = map[uintptr]chan bool{}
 	Debug        = false // Set to true to enable debug logging
 )
 
@@ -384,7 +390,7 @@ func (w *webview) GetCookies() ([]Cookie, error) {
 			println("GetCookies: received", len(result), "cookies")
 		}
 		return result, nil
-	case <-time.After(10 * time.Second):
+	case <-time.After(1 * time.Second):
 		m.Lock()
 		delete(cookies, cookieIndex)
 		m.Unlock()
@@ -464,7 +470,7 @@ func (w *webview) ClearCookies() error {
 			return errors.New("failed to clear cookies")
 		}
 		return nil
-	case <-time.After(10 * time.Second):
+	case <-time.After(1 * time.Second):
 		m.Lock()
 		delete(clearCookies, clearIndex)
 		m.Unlock()
@@ -488,6 +494,80 @@ func _webviewClearCookiesGoCallback(success C.int, index uintptr) {
 	if !ok {
 		if Debug {
 			println("_webviewClearCookiesGoCallback: channel not found for index", index)
+		}
+		return
+	}
+
+	ch <- success != 0
+}
+
+func (w *webview) SetCookie(cookie Cookie) error {
+	ch := make(chan bool, 1)
+
+	m.Lock()
+	// Find an unused index
+	for ; setCookies[index] != nil; index++ {
+	}
+	setCookies[index] = ch
+	setCookieIndex := index
+	index++ // Increment for next use
+	m.Unlock()
+
+	// Convert cookie to JSON
+	cookieJSON, err := json.Marshal(cookie)
+	if err != nil {
+		m.Lock()
+		delete(setCookies, setCookieIndex)
+		m.Unlock()
+		return err
+	}
+
+	// Debug log
+	if Debug {
+		println("SetCookie: calling C.CgoWebViewSetCookie with index", setCookieIndex, "and cookie:", string(cookieJSON))
+	}
+
+	cookieStr := C.CString(string(cookieJSON))
+	defer C.free(unsafe.Pointer(cookieStr))
+	C.CgoWebViewSetCookie(w.w, cookieStr, C.uintptr_t(setCookieIndex))
+
+	// Wait for the callback with timeout
+	select {
+	case success := <-ch:
+		m.Lock()
+		delete(setCookies, setCookieIndex)
+		m.Unlock()
+		if Debug {
+			println("SetCookie: operation completed with success:", success)
+		}
+		if !success {
+			return errors.New("failed to set cookie")
+		}
+		return nil
+	case <-time.After(1 * time.Second):
+		m.Lock()
+		delete(setCookies, setCookieIndex)
+		m.Unlock()
+		if Debug {
+			println("SetCookie: timeout after 10 seconds, index was", setCookieIndex)
+		}
+		return errors.New("timeout waiting for set cookie operation")
+	}
+}
+
+//export _webviewSetCookieGoCallback
+func _webviewSetCookieGoCallback(success C.int, index uintptr) {
+	if Debug {
+		println("_webviewSetCookieGoCallback: called with index", index, "success", success)
+	}
+
+	m.Lock()
+	ch, ok := setCookies[index]
+	m.Unlock()
+
+	if !ok {
+		if Debug {
+			println("_webviewSetCookieGoCallback: channel not found for index", index)
 		}
 		return
 	}

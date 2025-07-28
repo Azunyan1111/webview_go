@@ -2,6 +2,7 @@
 
 #include <stdlib.h>
 #include <stdint.h>
+#include <stdio.h>
 
 struct binding_context {
     webview_t w;
@@ -16,6 +17,7 @@ void _webviewDispatchGoCallback(void *);
 void _webviewBindingGoCallback(webview_t, char *, char *, uintptr_t);
 void _webviewCookieGoCallback(char *, uintptr_t);
 void _webviewClearCookiesGoCallback(int, uintptr_t);
+void _webviewSetCookieGoCallback(int, uintptr_t);
 
 static void _webview_dispatch_cb(webview_t w, void *arg) {
     _webviewDispatchGoCallback(arg);
@@ -63,4 +65,20 @@ void CgoWebViewClearCookies(webview_t w, uintptr_t index) {
     struct cookie_context *ctx = calloc(1, sizeof(struct cookie_context));
     ctx->index = index;
     webview_clear_cookies(w, _webview_clear_cookies_cb, (void *)ctx);
+}
+
+static void _webview_set_cookie_cb(int success, void *arg) {
+    struct cookie_context *ctx = (struct cookie_context *) arg;
+    _webviewSetCookieGoCallback(success, ctx->index);
+    free(ctx);
+}
+
+void CgoWebViewSetCookie(webview_t w, const char *cookieJSON, uintptr_t index) {
+    printf("CgoWebViewSetCookie: entered with index=%lu\n", (unsigned long)index);
+    printf("CgoWebViewSetCookie: cookieJSON=%s\n", cookieJSON);
+    struct cookie_context *ctx = calloc(1, sizeof(struct cookie_context));
+    ctx->index = index;
+    printf("CgoWebViewSetCookie: calling webview_set_cookie\n");
+    webview_set_cookie(w, cookieJSON, _webview_set_cookie_cb, (void *)ctx);
+    printf("CgoWebViewSetCookie: returned from webview_set_cookie\n");
 }
