@@ -74,11 +74,7 @@ static void _webview_set_cookie_cb(int success, void *arg) {
 }
 
 void CgoWebViewSetCookie(webview_t w, const char *cookieJSON, uintptr_t index) {
-    printf("CgoWebViewSetCookie: entered with index=%lu\n", (unsigned long)index);
-    printf("CgoWebViewSetCookie: cookieJSON=%s\n", cookieJSON);
     struct cookie_context *ctx = calloc(1, sizeof(struct cookie_context));
     ctx->index = index;
-    printf("CgoWebViewSetCookie: calling webview_set_cookie\n");
     webview_set_cookie(w, cookieJSON, _webview_set_cookie_cb, (void *)ctx);
-    printf("CgoWebViewSetCookie: returned from webview_set_cookie\n");
 }

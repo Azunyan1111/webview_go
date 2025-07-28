@@ -1988,11 +1988,9 @@ public:
   }
   
   void set_cookie_impl(const std::string &cookieJSON, webview_set_cookie_callback_t callback, void *arg) override {
-    printf("set_cookie_impl: entered\n");
     
     // If we're already on the main thread, execute directly
     if (objc::msg_send<BOOL>("NSThread"_cls, "isMainThread"_sel)) {
-      printf("set_cookie_impl: on main thread\n");
       objc::autoreleasepool arp;
       
       // Parse JSON to extract cookie properties
@@ -2004,86 +2002,86 @@ public:
       auto httpOnly = json_parse(cookieJSON, "httpOnly", 0);
       auto expires = json_parse(cookieJSON, "expires", 0);
       
-      // Debug output using callback
+      // Check if we have required fields
       if (name.empty() || value.empty()) {
-        callback(2, arg);  // 2 = empty name or value
+        callback(0, arg);  // 0 = failure
         return;
       }
       
-      // Create NSHTTPCookie using individual properties
-      // First check if we have required fields
-      if (name.empty() || value.empty()) {
-        callback(2, arg);  // 2 = empty name or value
-        return;
-      }
+      // Get the WKWebView's configuration and cookie store
+      auto config = objc::msg_send<id>(m_webview, "configuration"_sel);
+      auto dataStore = objc::msg_send<id>(config, "websiteDataStore"_sel);
+      auto cookieStore = objc::msg_send<id>(dataStore, "httpCookieStore"_sel);
       
-      // For macOS with WKWebView, we need to set cookies using JavaScript
-      // This is more reliable than trying to use NSHTTPCookie directly
-      std::string cookieString = name + "=" + value;
+      // Create NSMutableDictionary for cookie properties
+      auto cookieProps = objc::msg_send<id>("NSMutableDictionary"_cls, "dictionary"_sel);
       
-      if (!path.empty()) {
-        cookieString += "; path=" + path;
-      } else {
-        cookieString += "; path=/";
-      }
+      // Set required properties
+      objc::msg_send<void>(cookieProps, "setObject:forKey:"_sel, name.c_str()._str, "NSHTTPCookieName"_str);
+      objc::msg_send<void>(cookieProps, "setObject:forKey:"_sel, value.c_str()._str, "NSHTTPCookieValue"_str);
       
+      // Set domain (default to current domain if not specified)
       if (!domain.empty()) {
-        cookieString += "; domain=" + domain;
+        objc::msg_send<void>(cookieProps, "setObject:forKey:"_sel, domain.c_str()._str, "NSHTTPCookieDomain"_str);
       }
       
+      // Set path (default to "/" if not specified)
+      if (!path.empty()) {
+        objc::msg_send<void>(cookieProps, "setObject:forKey:"_sel, path.c_str()._str, "NSHTTPCookiePath"_str);
+      } else {
+        objc::msg_send<void>(cookieProps, "setObject:forKey:"_sel, "/"_str, "NSHTTPCookiePath"_str);
+      }
+      
+      // Set secure flag
       if (secure == "true") {
-        cookieString += "; secure";
+        auto yesValue = objc::msg_send<id>("NSNumber"_cls, "numberWithBool:"_sel, YES);
+        objc::msg_send<void>(cookieProps, "setObject:forKey:"_sel, yesValue, "NSHTTPCookieSecure"_str);
       }
       
+      // Set httpOnly flag
       if (httpOnly == "true") {
-        cookieString += "; httpOnly";
+        auto yesValue = objc::msg_send<id>("NSNumber"_cls, "numberWithBool:"_sel, YES);
+        objc::msg_send<void>(cookieProps, "setObject:forKey:"_sel, yesValue, "NSHTTPCookieHTTPOnly"_str);
       }
       
+      // Set expiration date if provided
       if (!expires.empty()) {
         try {
           double timestamp = std::stod(expires);
-          // Convert to GMT string
           auto nsDate = objc::msg_send<id>("NSDate"_cls, "dateWithTimeIntervalSince1970:"_sel, timestamp);
-          auto formatter = objc::msg_send<id>("NSDateFormatter"_cls, "new"_sel);
-          objc::msg_send<void>(formatter, "setDateFormat:"_sel, "EEE, dd MMM yyyy HH:mm:ss zzz"_str);
-          objc::msg_send<void>(formatter, "setTimeZone:"_sel, 
-                               objc::msg_send<id>("NSTimeZone"_cls, "timeZoneWithAbbreviation:"_sel, "GMT"_str));
-          auto dateStr = objc::msg_send<id>(formatter, "stringFromDate:"_sel, nsDate);
-          auto cDateStr = objc::msg_send<const char*>(dateStr, "UTF8String"_sel);
-          cookieString += "; expires=" + std::string(cDateStr);
-          objc::msg_send<void>(formatter, "release"_sel);
+          objc::msg_send<void>(cookieProps, "setObject:forKey:"_sel, nsDate, "NSHTTPCookieExpires"_str);
         } catch (...) {
           // Invalid timestamp, ignore
         }
       }
       
-      // Use JavaScript to set the cookie
-      std::string js = "document.cookie = \"" + cookieString + "\"";
-      printf("set_cookie_impl: cookie string = %s\n", cookieString.c_str());
-      printf("set_cookie_impl: js = %s\n", js.c_str());
+      // Create NSHTTPCookie from properties
+      auto cookie = objc::msg_send<id>("NSHTTPCookie"_cls, "cookieWithProperties:"_sel, cookieProps);
       
-      // Evaluate JavaScript with a simple completion handler
-      printf("set_cookie_impl: creating NSString\n");
-      auto jsStr = objc::msg_send<id>("NSString"_cls, "stringWithUTF8String:"_sel, js.c_str());
-      printf("set_cookie_impl: NSString created\n");
+      if (!cookie) {
+        callback(0, arg);  // 0 = failure
+        return;
+      }
       
-      // Create a simple completion block that just calls the callback
-      printf("set_cookie_impl: creating completion handler\n");
-      auto completionHandler = ^(id result, id error) {
-        printf("set_cookie_impl: completion handler called\n");
-        // Just call callback with success
-        // We can't easily check for errors here
-        callback(1, arg);
+      // Create a callback data structure to safely pass to the block
+      struct cookie_callback_data {
+        webview_set_cookie_callback_t callback;
+        void *arg;
       };
-      printf("set_cookie_impl: completion handler created\n");
       
-      printf("set_cookie_impl: calling evaluateJavaScript\n");
-      objc::msg_send<void>(m_webview, "evaluateJavaScript:completionHandler:"_sel, 
-                           jsStr, completionHandler);
-      printf("set_cookie_impl: evaluateJavaScript returned\n");
+      auto *callback_data = new cookie_callback_data{callback, arg};
+      
+      // Create completion handler block for setCookie
+      auto completionHandler = ^{
+        callback_data->callback(1, callback_data->arg);  // 1 = success
+        delete callback_data;
+      };
+      
+      // Set the cookie using WKHTTPCookieStore
+      objc::msg_send<void>(cookieStore, "setCookie:completionHandler:"_sel, 
+                           cookie, completionHandler);
     } else {
       // Not on main thread, use dispatch
-      printf("set_cookie_impl: NOT on main thread, dispatching\n");
       dispatch([this, cookieJSON, callback, arg]() {
         set_cookie_impl(cookieJSON, callback, arg);
       });
@@ -4036,17 +4034,13 @@ WEBVIEW_API void webview_clear_cookies(webview_t w, webview_clear_cookies_callba
 }
 
 WEBVIEW_API void webview_set_cookie(webview_t w, const char *cookieJSON, webview_set_cookie_callback_t callback, void *arg) {
-  printf("webview_set_cookie: entered with cookieJSON=%s\n", cookieJSON ? cookieJSON : "NULL");
   if (!w || !cookieJSON || !callback) {
-    printf("webview_set_cookie: invalid arguments\n");
     if (callback) {
       callback(0, arg);
     }
     return;
   }
-  printf("webview_set_cookie: creating string and calling set_cookie\n");
   static_cast<webview::detail::engine_base *>(w)->set_cookie(std::string(cookieJSON), callback, arg);
-  printf("webview_set_cookie: returned from set_cookie\n");
 }
 
 #endif /* WEBVIEW_HEADER */

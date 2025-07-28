@@ -74,6 +74,24 @@ func main() {
 			log.Println("SetCookie success")
 		}
 
+		// Test SetCookie with HTTPOnly flag
+		log.Println("Testing SetCookie with HTTPOnly...")
+		httpOnlyCookie := webview.Cookie{
+			Name:     "secure_cookie",
+			Value:    "secure_value_456",
+			Domain:   ".example.com",
+			Path:     "/",
+			HTTPOnly: true,
+			Secure:   true,
+		}
+		
+		err = w.SetCookie(httpOnlyCookie)
+		if err != nil {
+			log.Printf("SetCookie (HTTPOnly) error: %v", err)
+		} else {
+			log.Println("SetCookie (HTTPOnly) success")
+		}
+
 		// Wait and get cookies again
 		time.Sleep(1 * time.Second)
 		
@@ -83,10 +101,12 @@ func main() {
 			log.Printf("GetCookies error: %v", err)
 		} else {
 			log.Printf("GetCookies success: %d cookies", len(cookies))
-			// Check if our cookie is there
+			// Check if our cookies are there
 			for _, c := range cookies {
 				if c.Name == "test_cookie" {
-					log.Printf("✓ Found our test cookie: %s=%s", c.Name, c.Value)
+					log.Printf("✓ Found test cookie: %s=%s (HTTPOnly: %v)", c.Name, c.Value, c.HTTPOnly)
+				} else if c.Name == "secure_cookie" {
+					log.Printf("✓ Found secure cookie: %s=%s (HTTPOnly: %v, Secure: %v)", c.Name, c.Value, c.HTTPOnly, c.Secure)
 				}
 			}
 		}

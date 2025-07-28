@@ -373,10 +373,6 @@ func (w *webview) GetCookies() ([]Cookie, error) {
 	index++ // Increment for next use
 	m.Unlock()
 
-	// Debug log
-	if Debug {
-		println("GetCookies: calling C.CgoWebViewGetCookies with index", cookieIndex)
-	}
 
 	C.CgoWebViewGetCookies(w.w, C.uintptr_t(cookieIndex))
 
@@ -386,54 +382,33 @@ func (w *webview) GetCookies() ([]Cookie, error) {
 		m.Lock()
 		delete(cookies, cookieIndex)
 		m.Unlock()
-		if Debug {
-			println("GetCookies: received", len(result), "cookies")
-		}
 		return result, nil
 	case <-time.After(1 * time.Second):
 		m.Lock()
 		delete(cookies, cookieIndex)
 		m.Unlock()
-		if Debug {
-			println("GetCookies: timeout after 10 seconds, index was", cookieIndex)
-		}
 		return nil, errors.New("timeout waiting for cookies")
 	}
 }
 
 //export _webviewCookieGoCallback
 func _webviewCookieGoCallback(cookiesJSON *C.char, index uintptr) {
-	if Debug {
-		println("_webviewCookieGoCallback: called with index", index)
-	}
 
 	m.Lock()
 	ch, ok := cookies[index]
 	m.Unlock()
 
 	if !ok {
-		if Debug {
-			println("_webviewCookieGoCallback: channel not found for index", index)
-		}
 		return
 	}
 
 	jsonStr := C.GoString(cookiesJSON)
-	if Debug {
-		println("_webviewCookieGoCallback: received JSON:", jsonStr)
-	}
 
 	var cookieList []Cookie
 	if err := json.Unmarshal([]byte(jsonStr), &cookieList); err != nil {
-		if Debug {
-			println("_webviewCookieGoCallback: JSON unmarshal error:", err.Error())
-		}
 		// Send empty list on error
 		ch <- []Cookie{}
 	} else {
-		if Debug {
-			println("_webviewCookieGoCallback: parsed", len(cookieList), "cookies")
-		}
 		ch <- cookieList
 	}
 }
@@ -450,10 +425,6 @@ func (w *webview) ClearCookies() error {
 	index++ // Increment for next use
 	m.Unlock()
 
-	// Debug log
-	if Debug {
-		println("ClearCookies: calling C.CgoWebViewClearCookies with index", clearIndex)
-	}
 
 	C.CgoWebViewClearCookies(w.w, C.uintptr_t(clearIndex))
 
@@ -463,9 +434,6 @@ func (w *webview) ClearCookies() error {
 		m.Lock()
 		delete(clearCookies, clearIndex)
 		m.Unlock()
-		if Debug {
-			println("ClearCookies: operation completed with success:", success)
-		}
 		if !success {
 			return errors.New("failed to clear cookies")
 		}
@@ -474,27 +442,18 @@ func (w *webview) ClearCookies() error {
 		m.Lock()
 		delete(clearCookies, clearIndex)
 		m.Unlock()
-		if Debug {
-			println("ClearCookies: timeout after 10 seconds, index was", clearIndex)
-		}
 		return errors.New("timeout waiting for clear cookies operation")
 	}
 }
 
 //export _webviewClearCookiesGoCallback
 func _webviewClearCookiesGoCallback(success C.int, index uintptr) {
-	if Debug {
-		println("_webviewClearCookiesGoCallback: called with index", index, "success", success)
-	}
 
 	m.Lock()
 	ch, ok := clearCookies[index]
 	m.Unlock()
 
 	if !ok {
-		if Debug {
-			println("_webviewClearCookiesGoCallback: channel not found for index", index)
-		}
 		return
 	}
 
@@ -522,10 +481,6 @@ func (w *webview) SetCookie(cookie Cookie) error {
 		return err
 	}
 
-	// Debug log
-	if Debug {
-		println("SetCookie: calling C.CgoWebViewSetCookie with index", setCookieIndex, "and cookie:", string(cookieJSON))
-	}
 
 	cookieStr := C.CString(string(cookieJSON))
 	defer C.free(unsafe.Pointer(cookieStr))
@@ -537,9 +492,6 @@ func (w *webview) SetCookie(cookie Cookie) error {
 		m.Lock()
 		delete(setCookies, setCookieIndex)
 		m.Unlock()
-		if Debug {
-			println("SetCookie: operation completed with success:", success)
-		}
 		if !success {
 			return errors.New("failed to set cookie")
 		}
@@ -548,27 +500,18 @@ func (w *webview) SetCookie(cookie Cookie) error {
 		m.Lock()
 		delete(setCookies, setCookieIndex)
 		m.Unlock()
-		if Debug {
-			println("SetCookie: timeout after 10 seconds, index was", setCookieIndex)
-		}
 		return errors.New("timeout waiting for set cookie operation")
 	}
 }
 
 //export _webviewSetCookieGoCallback
 func _webviewSetCookieGoCallback(success C.int, index uintptr) {
-	if Debug {
-		println("_webviewSetCookieGoCallback: called with index", index, "success", success)
-	}
 
 	m.Lock()
 	ch, ok := setCookies[index]
 	m.Unlock()
 
 	if !ok {
-		if Debug {
-			println("_webviewSetCookieGoCallback: channel not found for index", index)
-		}
 		return
 	}
 
